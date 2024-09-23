@@ -1,0 +1,74 @@
+const puppeteer = require('puppeteer');
+const mysql = require('mysql2');
+require('dotenv').config();
+
+async function extrairHeader(page, extractUntil) {
+  const dadosHeader = [];
+  const TRs = await page.$$("tr");
+
+  for (const TR of TRs) {
+    const textoLinha = await page.evaluate(el => el.textContent.trim(), TR);
+    if (textoLinha.match(new RegExp(`.*${extractUntil}.*`))) {
+      break;
+    }
+    const TDs = await TR.$$("td");
+    const ArrayLine = [];
+    for (const TD of TDs) {
+      const texto = await page.evaluate(el => el.textContent.trim(), TD);
+      if (texto !== "") {
+        ArrayLine.push(texto);
+      }
+    }
+    if (ArrayLine.length > 0) {
+      dadosHeader.push(ArrayLine);
+    }
+  }
+  return { dadosHeader };
+}
+
+async function processHeader() {
+  try {
+    const browser = await puppeteer.launch({ headless: false, executablePath: "" });
+    const page = await browser.newPage();
+    await page.goto("file:///C:/Users/Administrador/Desktop/RELATORIO/RELATORIO_PROCESSO_00210628420205040026_CALCULO_3_DATA_11092024_HORA_170424.html");
+    await page.waitForSelector("tr");
+
+    const extractUntil = "Resumo do Cálculo";
+    const { dadosHeader } = await extrairHeader(page, extractUntil);
+
+    const HeaderIndex = dadosHeader.map(([Processo, Cálculo, Reclamante, Reclamado, Data_Ajuizamento, Data_Liquidação]) => ({
+      Processo,
+      Cálculo,
+      Reclamante,
+      Reclamado,
+      Data_Ajuizamento,
+      Data_Liquidação,
+    }));
+
+    console.log("Dados Resumo Cálculo", HeaderIndex);
+
+    const connection = mysql.createConnection({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      port: process.env.DB_PORT,
+    });
+
+    connection.connect();
+
+    const InsertHeader = "INSERT INTO cabecalho_calculo (Cálculo, Reclamante, Reclamado, Data_Ajuizamento, Processo, Data_Liquidação) VALUES (?, ?, ?, ?, ?, ?)";
+
+    for (const item of HeaderIndex) {
+      connection.query(InsertHeader, [item.Cálculo, item.Reclamante, item.Reclamado, item.Data_Ajuizamento, item.Processo, item.Data_Liquidação], (error) => {
+        if (error) throw error;
+      });
+    }
+    connection.end();
+    await browser.close();
+  } catch (erro) {
+    console.log(erro);
+  }
+}
+
+processHeader();
